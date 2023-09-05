@@ -1,0 +1,13 @@
+syntax = "proto3";
+package synclipper;
+
+message Empty {}
+
+message Content {
+  string text = 1;
+}
+
+service SynClipper {
+  rpc SyncClipboard (Empty) returns (stream Content);
+  rpc SetClipboard (Content) returns (Empty);
+}
