@@ -12,12 +12,12 @@ type ClipboardContext = Arc<Mutex<clipboard::ClipboardContext>>;
 type MessageSender = mpsc::UnboundedSender<ClipboardEvent>;
 // type MessageReceiver = mpsc::UnboundedReceiver<ClipboardEvent>;
 
-pub type ClipboardSender = watch::Sender<Option<String>>;
-pub type ClipboardReceiver = watch::Receiver<Option<String>>;
+pub type ClipboardSender = watch::Sender<String>;
+pub type ClipboardReceiver = watch::Receiver<String>;
 
 #[derive(Clone)]
 pub struct Clipboard {
-    pub current: ClipboardReceiver,
+    current: ClipboardReceiver,
     message: MessageSender,
     handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
@@ -28,10 +28,10 @@ pub enum ClipboardEvent {
 }
 
 impl Clipboard {
-    pub fn new(frequency: u64) -> Result<Self> {
+    pub async fn new(frequency: u64) -> Result<Self> {
         let context = ClipboardProvider::new().map_err(|e| eyre!(format!("{:?}", e)))?;
         let context = Arc::new(Mutex::new(context));
-        let (handle, current, message) = Self::start(context.clone(), frequency)?;
+        let (handle, current, message) = Self::start(context.clone(), frequency).await?;
         let clipboard = Self {
             message,
             current,
@@ -40,11 +40,12 @@ impl Clipboard {
         Ok(clipboard)
     }
 
-    pub fn start(
+    pub async fn start(
         context: ClipboardContext,
         frequency: u64,
     ) -> Result<(JoinHandle<()>, ClipboardReceiver, MessageSender)> {
-        let (current_tx, current_rx) = watch::channel(None);
+        let content = Self::get_clipboard(context.clone()).await?;
+        let (current_tx, current_rx) = watch::channel(content);
         let (message_tx, mut message_rx) = mpsc::unbounded_channel::<ClipboardEvent>();
 
         let handle: JoinHandle<()> = tokio::spawn(async move {
@@ -53,19 +54,19 @@ impl Clipboard {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(e) = Self::polling(&current_tx, context.clone()).await {
-                            error!("polling error: {:?}", e);
+                            error!("Polling error: {:?}", e);
                         }
                     }
                     Some(event) = message_rx.recv() => {
                         match &event {
                             ClipboardEvent::Set(content) => {
-                                info!("set clipboard: {:?}", content);
+                                info!("Set clipboard to [Local]: {:?}", content);
                                 if let Err(e) = Self::set_clipboard(context.clone(), content.clone()).await {
-                                    error!("set clipboard error: {:?}", e);
+                                    error!("[Remote] set clipboard error: {:?}", e);
                                 }
                             }
                             ClipboardEvent::Shutdown => {
-                                info!("clipboard shutdown");
+                                info!("Clipboard shutdown");
                                 break;
                             }
                         }
@@ -79,12 +80,15 @@ impl Clipboard {
 
     async fn polling(current_tx: &ClipboardSender, context: ClipboardContext) -> Result<()> {
         let content = Self::get_clipboard(context).await?;
-        current_tx.send(Some(content)).map_err(|e| eyre!(format!("{:?}", e)))?;
-        let current_rx = current_tx.subscribe();
-        if current_rx.has_changed()? {
-            let content = current_rx.borrow();
-            info!("set clipboard: {:?}", content);
-        }
+        current_tx.send_if_modified(move |prev| {
+            if prev != &content {
+                *prev = content;
+                info!("[Local] new clipboard: {:?}", prev);
+                true
+            } else {
+                false
+            }
+        });
         Ok(())
     }
 
@@ -111,7 +115,7 @@ impl Clipboard {
         Ok(())
     }
 
-    pub async fn get(&mut self) -> Result<Option<String>> {
+    pub async fn get(&mut self) -> Result<String> {
         self.current.changed().await?;
         Ok(self.current.borrow_and_update().clone())
     }
@@ -122,7 +126,7 @@ impl Clipboard {
         Ok(())
     }
 
-    pub fn as_stream(&self) -> WatchStream<Option<String>> {
+    pub fn as_stream(&self) -> WatchStream<String> {
         WatchStream::new(self.current.clone())
     }
 }

@@ -2,6 +2,7 @@ mod synclip_rpc;
 
 use crate::clipboard::Clipboard;
 use crate::server::synclip_rpc::SynclipRpc;
+use crate::synclip_server;
 use color_eyre::eyre::eyre;
 use color_eyre::Result;
 use tokio::task::JoinHandle;
@@ -17,7 +18,7 @@ impl SynclipServer {
         let rpc = SynclipRpc::new(clipboard);
         let addr = format!("0.0.0.0:{}", port).parse()?;
         let mut server = tonic::transport::Server::default();
-        let router = server.add_service(synclip_proto::synclip_server::SynclipServer::new(rpc));
+        let router = server.add_service(synclip_server::SynclipServer::new(rpc));
 
         let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
         let server_handle: JoinHandle<Result<()>> = tokio::spawn(async move {

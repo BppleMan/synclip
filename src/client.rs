@@ -1,19 +1,19 @@
 use crate::clipboard::Clipboard;
+use crate::{synclip_client, Content, Empty};
 use color_eyre::Result;
-use synclip_proto::Content;
 use tonic::transport::Channel;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(Clone)]
 pub struct SynclipClient {
-    client: synclip_proto::synclip_client::SynclipClient<Channel>,
+    client: synclip_client::SynclipClient<Channel>,
     clipboard: Clipboard,
     shutdown_sender: tokio::sync::broadcast::Sender<()>,
 }
 
 impl SynclipClient {
     pub async fn new(address: impl AsRef<str>, clipboard: Clipboard) -> Result<Self> {
-        let client = synclip_proto::synclip_client::SynclipClient::connect(address.as_ref().to_owned()).await?;
+        let client = synclip_client::SynclipClient::connect(address.as_ref().to_owned()).await?;
         let (shutdown_sender, _) = tokio::sync::broadcast::channel::<()>(1);
         let client = Self {
             client,
@@ -33,13 +33,14 @@ impl SynclipClient {
                 _ = async {
                     match self.clipboard.get().await {
                         Ok(content) => {
+                            info!("Get clipboard from [Local]: {:?}", content);
                             let request = tonic::Request::new(Content { text: content });
                             if let Err(e) = self.client.set_clipboard(request).await {
-                                error!("set clipboard to server error: {:?}", e);
+                                error!("Send clipboard to [Remote] error: {:?}", e);
                             }
                         }
                         Err(e) => {
-                            error!("get clipboard error: {:?}", e);
+                            error!("Get clipboard from [Local] error: {:?}", e);
                         }
                     }
                 } => {}
@@ -50,7 +51,7 @@ impl SynclipClient {
 
     pub async fn polling_server(&mut self) -> Result<()> {
         let mut signal_rx = self.shutdown_sender.subscribe();
-        let request = tonic::Request::new(synclip_proto::Empty::default());
+        let request = tonic::Request::new(Empty::default());
         let mut stream = self.client.polling_clipboard(request).await?.into_inner();
         loop {
             tokio::select! {
@@ -60,8 +61,9 @@ impl SynclipClient {
                 _ = async {
                     match stream.message().await {
                         Ok(content) => {
-                            if let Some(Content { text: Some(content) }) = content {
-                                if let Err(e) = self.clipboard.set(content) {
+                            if let Some(Content { text }) = content {
+                                info!("Get clipboard from [Remote]: {:?}", text);
+                                if let Err(e) = self.clipboard.set(text) {
                                     error!("set clipboard error: {:?}", e);
                                 }
                             }

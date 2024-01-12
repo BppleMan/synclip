@@ -1,10 +1,8 @@
-mod client;
-mod clipboard;
-mod server;
-
-use crate::clipboard::Clipboard;
 use clap::Parser;
 use color_eyre::Result;
+
+use synclip::clipboard::Clipboard;
+use synclip::{client, server};
 
 #[derive(Parser)]
 #[command(
@@ -21,7 +19,7 @@ pub enum Cli {
     },
     /// Run as a client
     Client {
-        /// The address to connect to
+        /// The address to connect to (lke http://[remote]:[port])
         address: String,
     },
 }
@@ -33,7 +31,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let clipboard = Clipboard::new(500)?;
+    let clipboard = Clipboard::new(500).await?;
 
     match cli {
         Cli::Server { port } => {
