@@ -4,19 +4,19 @@ pub struct Empty {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Content {
-    #[prost(string, tag = "1")]
-    pub text: ::prost::alloc::string::String,
+    #[prost(string, optional, tag = "1")]
+    pub text: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Generated client implementations.
-pub mod syn_clipper_client {
+pub mod synclip_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct SynClipperClient<T> {
+    pub struct SynclipClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl SynClipperClient<tonic::transport::Channel> {
+    impl SynclipClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -27,7 +27,7 @@ pub mod syn_clipper_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> SynClipperClient<T>
+    impl<T> SynclipClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -45,7 +45,7 @@ pub mod syn_clipper_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> SynClipperClient<InterceptedService<T, F>>
+        ) -> SynclipClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -59,7 +59,7 @@ pub mod syn_clipper_client {
                 http::Request<tonic::body::BoxBody>,
             >>::Error: Into<StdError> + Send + Sync,
         {
-            SynClipperClient::new(InterceptedService::new(inner, interceptor))
+            SynclipClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -92,7 +92,7 @@ pub mod syn_clipper_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        pub async fn sync_clipboard(
+        pub async fn polling_clipboard(
             &mut self,
             request: impl tonic::IntoRequest<super::Empty>,
         ) -> std::result::Result<
@@ -110,11 +110,11 @@ pub mod syn_clipper_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/synclipper.SynClipper/SyncClipboard",
+                "/synclip.Synclip/PollingClipboard",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("synclipper.SynClipper", "SyncClipboard"));
+                .insert(GrpcMethod::new("synclip.Synclip", "PollingClipboard"));
             self.inner.server_streaming(req, path, codec).await
         }
         pub async fn set_clipboard(
@@ -132,33 +132,33 @@ pub mod syn_clipper_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/synclipper.SynClipper/SetClipboard",
+                "/synclip.Synclip/SetClipboard",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("synclipper.SynClipper", "SetClipboard"));
+                .insert(GrpcMethod::new("synclip.Synclip", "SetClipboard"));
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod syn_clipper_server {
+pub mod synclip_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with SynClipperServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with SynclipServer.
     #[async_trait]
-    pub trait SynClipper: Send + Sync + 'static {
-        /// Server streaming response type for the SyncClipboard method.
-        type SyncClipboardStream: futures_core::Stream<
+    pub trait Synclip: Send + Sync + 'static {
+        /// Server streaming response type for the PollingClipboard method.
+        type PollingClipboardStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::Content, tonic::Status>,
             >
             + Send
             + 'static;
-        async fn sync_clipboard(
+        async fn polling_clipboard(
             &self,
             request: tonic::Request<super::Empty>,
         ) -> std::result::Result<
-            tonic::Response<Self::SyncClipboardStream>,
+            tonic::Response<Self::PollingClipboardStream>,
             tonic::Status,
         >;
         async fn set_clipboard(
@@ -167,7 +167,7 @@ pub mod syn_clipper_server {
         ) -> std::result::Result<tonic::Response<super::Empty>, tonic::Status>;
     }
     #[derive(Debug)]
-    pub struct SynClipperServer<T: SynClipper> {
+    pub struct SynclipServer<T: Synclip> {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
@@ -175,7 +175,7 @@ pub mod syn_clipper_server {
         max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
-    impl<T: SynClipper> SynClipperServer<T> {
+    impl<T: Synclip> SynclipServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -227,9 +227,9 @@ pub mod syn_clipper_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for SynClipperServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for SynclipServer<T>
     where
-        T: SynClipper,
+        T: Synclip,
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
@@ -245,15 +245,13 @@ pub mod syn_clipper_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/synclipper.SynClipper/SyncClipboard" => {
+                "/synclip.Synclip/PollingClipboard" => {
                     #[allow(non_camel_case_types)]
-                    struct SyncClipboardSvc<T: SynClipper>(pub Arc<T>);
-                    impl<
-                        T: SynClipper,
-                    > tonic::server::ServerStreamingService<super::Empty>
-                    for SyncClipboardSvc<T> {
+                    struct PollingClipboardSvc<T: Synclip>(pub Arc<T>);
+                    impl<T: Synclip> tonic::server::ServerStreamingService<super::Empty>
+                    for PollingClipboardSvc<T> {
                         type Response = super::Content;
-                        type ResponseStream = T::SyncClipboardStream;
+                        type ResponseStream = T::PollingClipboardStream;
                         type Future = BoxFuture<
                             tonic::Response<Self::ResponseStream>,
                             tonic::Status,
@@ -264,7 +262,7 @@ pub mod syn_clipper_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                (*inner).sync_clipboard(request).await
+                                <T as Synclip>::polling_clipboard(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -276,7 +274,7 @@ pub mod syn_clipper_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = SyncClipboardSvc(inner);
+                        let method = PollingClipboardSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -292,10 +290,10 @@ pub mod syn_clipper_server {
                     };
                     Box::pin(fut)
                 }
-                "/synclipper.SynClipper/SetClipboard" => {
+                "/synclip.Synclip/SetClipboard" => {
                     #[allow(non_camel_case_types)]
-                    struct SetClipboardSvc<T: SynClipper>(pub Arc<T>);
-                    impl<T: SynClipper> tonic::server::UnaryService<super::Content>
+                    struct SetClipboardSvc<T: Synclip>(pub Arc<T>);
+                    impl<T: Synclip> tonic::server::UnaryService<super::Content>
                     for SetClipboardSvc<T> {
                         type Response = super::Empty;
                         type Future = BoxFuture<
@@ -308,7 +306,7 @@ pub mod syn_clipper_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                (*inner).set_clipboard(request).await
+                                <T as Synclip>::set_clipboard(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -351,7 +349,7 @@ pub mod syn_clipper_server {
             }
         }
     }
-    impl<T: SynClipper> Clone for SynClipperServer<T> {
+    impl<T: Synclip> Clone for SynclipServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -363,7 +361,7 @@ pub mod syn_clipper_server {
             }
         }
     }
-    impl<T: SynClipper> Clone for _Inner<T> {
+    impl<T: Synclip> Clone for _Inner<T> {
         fn clone(&self) -> Self {
             Self(Arc::clone(&self.0))
         }
@@ -373,7 +371,7 @@ pub mod syn_clipper_server {
             write!(f, "{:?}", self.0)
         }
     }
-    impl<T: SynClipper> tonic::server::NamedService for SynClipperServer<T> {
-        const NAME: &'static str = "synclipper.SynClipper";
+    impl<T: Synclip> tonic::server::NamedService for SynclipServer<T> {
+        const NAME: &'static str = "synclip.Synclip";
     }
 }

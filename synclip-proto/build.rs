@@ -8,19 +8,19 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let protobuf_dir = manifest_dir.join("proto");
     // build script的构建缓存的范围限制
-    println!("cargo:rerun-if-changed={}", protobuf_dir.display());
+    // println!("cargo:rerun-if-changed={}", protobuf_dir.display());
     let src_dir = manifest_dir.join("src");
-    clean_src(&src_dir);
+    // clean_src(&src_dir);
     let protos = list_files_recursively(&protobuf_dir);
     if !protos.is_empty() {
         tonic_build::configure()
             .build_client(true)
             .build_server(true)
-            .out_dir(&src_dir)
+            .out_dir(src_dir)
             .compile(&protos, &[protobuf_dir])
             .unwrap();
     }
-    update_lib(src_dir);
+    // update_lib(src_dir);
 }
 
 pub fn list_files_recursively(path: impl AsRef<Path>) -> Vec<PathBuf> {

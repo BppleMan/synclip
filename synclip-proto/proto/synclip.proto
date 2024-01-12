@@ -1,0 +1,13 @@
+syntax = "proto3";
+package synclip;
+
+message Empty {}
+
+message Content {
+  optional string text = 1;
+}
+
+service Synclip {
+  rpc PollingClipboard (Empty) returns (stream Content);
+  rpc SetClipboard (Content) returns (Empty);
+}
