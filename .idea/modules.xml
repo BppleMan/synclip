@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/synclipper.iml" filepath="$PROJECT_DIR$/.idea/synclipper.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/synclip.iml" filepath="$PROJECT_DIR$/.idea/synclip.iml" />
     </modules>
   </component>
 </project>

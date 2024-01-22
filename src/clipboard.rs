@@ -62,7 +62,7 @@ impl Clipboard {
                             ClipboardEvent::Set(content) => {
                                 info!("Set clipboard to [Local]: {:?}", content);
                                 if let Err(e) = Self::set_clipboard(context.clone(), content.clone()).await {
-                                    error!("[Remote] set clipboard error: {:?}", e);
+                                    error!("Set clipboard to [Local] error: {:?}", e);
                                 }
                             }
                             ClipboardEvent::Shutdown => {
@@ -102,6 +102,10 @@ impl Clipboard {
     }
 
     async fn set_clipboard(context: ClipboardContext, content: String) -> Result<()> {
+        let current_context = Self::get_clipboard(context.clone()).await?;
+        if current_context == content {
+            return Ok(());
+        }
         context
             .lock()
             .await
@@ -111,7 +115,8 @@ impl Clipboard {
     }
 
     pub fn set(&self, content: impl AsRef<str>) -> Result<()> {
-        self.message.send(ClipboardEvent::Set(content.as_ref().to_string()))?;
+        self.message
+            .send(ClipboardEvent::Set(content.as_ref().to_string()))?;
         Ok(())
     }
 
