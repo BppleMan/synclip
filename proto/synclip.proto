@@ -7,7 +7,11 @@ message Content {
   string text = 1;
 }
 
+message Replaced {
+  bool replaced = 1;
+}
+
 service Synclip {
   rpc PollingClipboard (Empty) returns (stream Content);
-  rpc SetClipboard (Content) returns (Empty);
+  rpc SetClipboard (Content) returns (Replaced);
 }

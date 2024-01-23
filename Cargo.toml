@@ -1,10 +1,10 @@
 [package]
 name = "synclip"
-description = "A cross-network clipboard synchronization tool."
+description = "synclip is a cross-network clipboard synchronization tool."
 authors = ["BppleMan"]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-license-file = "LICENSE"
+license = "Apache-2.0"
 repository = "https://github.com/BppleMan/synclip"
 
 [dependencies]
@@ -12,8 +12,8 @@ prost = "0.12.3"
 tonic = "0.10.2"
 clipboard = "0.5.0"
 tokio = { version = "1.32.0", features = ["full"] }
+tokio-util = "0.7.10"
 tokio-stream = { version = "0.1.14", features = ["full"] }
-async-stream = "0.3.5"
 color-eyre = "0.6.2"
 clap = { version = "4.4.0", features = ["derive", "env"] }
 tracing = "0.1.40"

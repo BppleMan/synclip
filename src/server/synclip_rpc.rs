@@ -1,4 +1,6 @@
 use std::pin::Pin;
+use tokio::sync::watch;
+use tokio_stream::wrappers::WatchStream;
 use tokio_stream::StreamExt;
 
 use tonic::codegen::tokio_stream::Stream;
@@ -6,19 +8,19 @@ use tonic::{Request, Response, Status};
 
 use crate::proto::synclip_server::Synclip;
 use crate::proto::{Content, Empty};
-
-use crate::clipboard::Clipboard;
+use crate::Replaced;
 
 pub type ContentResult = Result<Content, Status>;
 type ContentStream = Pin<Box<dyn Stream<Item = ContentResult> + Send>>;
 
 pub struct SynclipRpc {
-    clipboard: Clipboard,
+    sender: watch::Sender<String>,
+    receiver: watch::Receiver<String>,
 }
 
 impl SynclipRpc {
-    pub fn new(clipboard: Clipboard) -> Self {
-        Self { clipboard }
+    pub fn new(sender: watch::Sender<String>, receiver: watch::Receiver<String>) -> Self {
+        Self { sender, receiver }
     }
 }
 
@@ -28,21 +30,24 @@ impl Synclip for SynclipRpc {
 
     async fn polling_clipboard(
         &self,
-        _: Request<Empty>,
+        _request: Request<Empty>,
     ) -> Result<Response<Self::PollingClipboardStream>, Status> {
         let stream = Box::pin(
-            self.clipboard
-                .as_stream()
-                .map(|content| Ok(Content { text: content })),
+            WatchStream::new(self.receiver.clone()).map(|content| Ok(Content { text: content })),
         );
         Ok(Response::new(stream))
     }
 
-    async fn set_clipboard(&self, request: Request<Content>) -> Result<Response<Empty>, Status> {
-        let content = request.into_inner();
-        self.clipboard
-            .set(content.text)
-            .map(|_| Response::new(Empty {}))
-            .map_err(|e| Status::new(tonic::Code::Unavailable, format!("{:?}", e)))
+    async fn set_clipboard(&self, request: Request<Content>) -> Result<Response<Replaced>, Status> {
+        let content = request.into_inner().text;
+        let replaced = self.sender.send_if_modified(|prev| {
+            if prev != &content {
+                *prev = content;
+                true
+            } else {
+                false
+            }
+        });
+        Ok(Response::new(Replaced { replaced }))
     }
 }

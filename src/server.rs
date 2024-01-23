@@ -1,50 +1,65 @@
 mod synclip_rpc;
 
-use crate::clipboard::Clipboard;
+use crate::clipboard::remote_clipboard::RemoteClipboard;
+use crate::clipboard::VirtualClipboard;
 use crate::server::synclip_rpc::SynclipRpc;
 use crate::synclip_server;
-use color_eyre::eyre::eyre;
 use color_eyre::Result;
+use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
+#[derive(Clone)]
 pub struct SynclipServer {
-    shutdown_sender: tokio::sync::oneshot::Sender<()>,
-    server_handle: JoinHandle<Result<()>>,
+    remote: RemoteClipboard,
+    handle: Arc<Mutex<Option<JoinHandle<Result<()>>>>>,
 }
 
 impl SynclipServer {
-    pub fn new(port: u16, clipboard: Clipboard) -> Result<Self> {
-        let rpc = SynclipRpc::new(clipboard);
+    pub async fn new(port: u16, initial: String, cancel_token: CancellationToken) -> Result<Self> {
+        let (sender_1, receiver_1) = watch::channel(initial.clone());
+        let (sender_2, receiver_2) = watch::channel(initial);
+        let rpc = SynclipRpc::new(sender_2, receiver_1);
+
         let addr = format!("0.0.0.0:{}", port).parse()?;
         let mut server = tonic::transport::Server::default();
         let router = server.add_service(synclip_server::SynclipServer::new(rpc));
 
-        let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        let server_handle: JoinHandle<Result<()>> = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             router
                 .serve_with_shutdown(addr, async move {
                     info!("Listening on: {}", addr);
-                    let signal = shutdown_receiver.await;
-                    info!("Received shutdown signal: {:?}", signal);
+                    cancel_token.cancelled().await;
+                    info!("Received shutdown signal");
                 })
                 .await?;
-            info!("Server shutdown");
+            info!("End [Server]");
             Ok(())
         });
 
         let server = Self {
-            shutdown_sender,
-            server_handle,
+            remote: RemoteClipboard::new(sender_1, receiver_2),
+            handle: Arc::new(Mutex::new(Some(handle))),
         };
+
         Ok(server)
     }
 
-    pub async fn shutdown(self) -> Result<()> {
-        self.shutdown_sender
-            .send(())
-            .map_err(|_| eyre!("Send shutdown signal error"))?;
-        self.server_handle.await??;
+    pub fn shutdown(self) -> Result<()> {
+        info!("Shutdown [Server]");
+        self.handle.lock().unwrap().take().unwrap().abort();
         Ok(())
+    }
+}
+
+impl VirtualClipboard for SynclipServer {
+    fn remote(&self) -> &RemoteClipboard {
+        &self.remote
+    }
+
+    fn shutdown(self) -> Result<()> {
+        self.shutdown()
     }
 }
