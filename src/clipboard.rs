@@ -1,137 +1,156 @@
-use clipboard::ClipboardProvider;
-use color_eyre::{eyre::eyre, Result};
+pub mod local_clipboard;
+pub mod remote_clipboard;
+
+use crate::clipboard::local_clipboard::LocalClipboard;
+use crate::clipboard::remote_clipboard::RemoteClipboard;
+use color_eyre::Result;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch, Mutex};
-use tokio::task::JoinHandle;
+use tokio::sync::{broadcast, watch};
 use tokio::time::interval;
-use tokio_stream::wrappers::WatchStream;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-type ClipboardContext = Arc<Mutex<clipboard::ClipboardContext>>;
-
-type MessageSender = mpsc::UnboundedSender<ClipboardEvent>;
-// type MessageReceiver = mpsc::UnboundedReceiver<ClipboardEvent>;
-
-pub type ClipboardSender = watch::Sender<String>;
+pub type ClipboardSender = broadcast::Sender<String>;
 pub type ClipboardReceiver = watch::Receiver<String>;
 
 #[derive(Clone)]
-pub struct Clipboard {
-    current: ClipboardReceiver,
-    message: MessageSender,
-    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+pub struct Clipboard<T: VirtualClipboard> {
+    remote: T,
+    local: LocalClipboard,
+    frequency: Arc<AtomicU64>,
+    cancel_token: CancellationToken,
 }
 
 pub enum ClipboardEvent {
-    Set(String),
+    SetLocal(String),
     Shutdown,
 }
 
-impl Clipboard {
-    pub async fn new(frequency: u64) -> Result<Self> {
-        let context = ClipboardProvider::new().map_err(|e| eyre!(format!("{:?}", e)))?;
-        let context = Arc::new(Mutex::new(context));
-        let (handle, current, message) = Self::start(context.clone(), frequency).await?;
-        let clipboard = Self {
-            message,
-            current,
-            handle: Arc::new(Mutex::new(Some(handle))),
-        };
-        Ok(clipboard)
+impl<T: VirtualClipboard + 'static> Clipboard<T> {
+    pub fn new(
+        local: LocalClipboard,
+        remote: T,
+        frequency: u64,
+        cancel_token: CancellationToken,
+    ) -> Self {
+        let frequency = Arc::new(AtomicU64::new(frequency));
+        Self {
+            remote,
+            local,
+            frequency,
+            cancel_token,
+        }
     }
 
-    pub async fn start(
-        context: ClipboardContext,
-        frequency: u64,
-    ) -> Result<(JoinHandle<()>, ClipboardReceiver, MessageSender)> {
-        let content = Self::get_clipboard(context.clone()).await?;
-        let (current_tx, current_rx) = watch::channel(content);
-        let (message_tx, mut message_rx) = mpsc::unbounded_channel::<ClipboardEvent>();
+    pub fn start(&mut self) -> std::thread::JoinHandle<()> {
+        let this = self.clone();
+        let handle1 = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(this.polling_local());
+        });
+        let this = self.clone();
+        let handle2 = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(this.listen_remote());
+        });
+        std::thread::spawn(move || {
+            handle1.join().unwrap();
+            handle2.join().unwrap();
+        })
+    }
 
-        let handle: JoinHandle<()> = tokio::spawn(async move {
-            let mut interval = interval(tokio::time::Duration::from_millis(frequency));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if let Err(e) = Self::polling(&current_tx, context.clone()).await {
-                            error!("Polling error: {:?}", e);
-                        }
-                    }
-                    Some(event) = message_rx.recv() => {
-                        match &event {
-                            ClipboardEvent::Set(content) => {
-                                info!("Set clipboard to [Local]: {:?}", content);
-                                if let Err(e) = Self::set_clipboard(context.clone(), content.clone()).await {
-                                    error!("Set clipboard to [Local] error: {:?}", e);
+    pub async fn shutdown(self) -> Result<()> {
+        info!("Shutdown [Remote]");
+        self.remote.shutdown()?;
+        Ok(())
+    }
+
+    async fn polling_local(&self) {
+        let mut interval = interval(tokio::time::Duration::from_millis(
+            self.frequency.load(Ordering::Relaxed),
+        ));
+        loop {
+            tokio::select! {
+                _ = self.cancel_token.cancelled() => {
+                    info!("Polling [Local] shutdown");
+                    break;
+                }
+                _ = interval.tick() => {
+                    match self.local.get().await {
+                        Ok(content) => {
+                            match self.remote.remote().set(content.clone()).await {
+                                Ok(replaced) => {
+                                    if replaced {
+                                        info!("Set [Remote] with: [{replaced}] {:?}", content);
+                                    }
                                 }
+                                Err(e) => {
+                                    error!("Set [Remote] error: {:?}", e);
+                                    break;
+                                },
                             }
-                            ClipboardEvent::Shutdown => {
-                                info!("Clipboard shutdown");
-                                break;
-                            }
+                        }
+                        Err(e) => {
+                            error!("Get [Local] error: {:?}", e);
+                            break;
                         }
                     }
                 }
             }
-        });
-
-        Ok((handle, current_rx, message_tx))
-    }
-
-    async fn polling(current_tx: &ClipboardSender, context: ClipboardContext) -> Result<()> {
-        let content = Self::get_clipboard(context).await?;
-        current_tx.send_if_modified(move |prev| {
-            if prev != &content {
-                *prev = content;
-                info!("[Local] new clipboard: {:?}", prev);
-                true
-            } else {
-                false
-            }
-        });
-        Ok(())
-    }
-
-    async fn get_clipboard(context: ClipboardContext) -> Result<String> {
-        let content = context
-            .lock()
-            .await
-            .get_contents()
-            .map_err(|e| eyre!(format!("{:?}", e)))?;
-        Ok(content)
-    }
-
-    async fn set_clipboard(context: ClipboardContext, content: String) -> Result<()> {
-        let current_context = Self::get_clipboard(context.clone()).await?;
-        if current_context == content {
-            return Ok(());
         }
-        context
-            .lock()
-            .await
-            .set_contents(content)
-            .map_err(|e| eyre!(format!("{:?}", e)))?;
-        Ok(())
+        self.cancel_token.cancel();
+        info!("End polling [Local]");
     }
 
-    pub fn set(&self, content: impl AsRef<str>) -> Result<()> {
-        self.message
-            .send(ClipboardEvent::Set(content.as_ref().to_string()))?;
-        Ok(())
+    async fn listen_remote(&self) {
+        loop {
+            tokio::select! {
+                _ = self.cancel_token.cancelled() => {
+                    info!("Listen [Remote] shutdown");
+                    break;
+                }
+                result =  async {
+                    match self.remote.remote().get_new().await {
+                        Ok(content) => {
+                            info!("Get [Remote] with: {:?}", content);
+                            match self.local.set(content.clone()).await {
+                                Ok(replaced) => {
+                                    if replaced {
+                                        info!("Set [Local] with: [{replaced}] {:?}", content);
+                                    }
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    error!("Set [Local] error: {:?}", e);
+                                    Err(())
+                                },
+                            }
+                        }
+                        Err(e) => {
+                            error!("Get [Remote] error: {:?}", e);
+                            Err(())
+                        }
+                    }
+                } => {
+                    if result.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        info!("End listen [Remote]");
     }
+}
 
-    pub async fn get(&mut self) -> Result<String> {
-        self.current.changed().await?;
-        Ok(self.current.borrow_and_update().clone())
-    }
+pub trait VirtualClipboard: Clone + Send + Sync {
+    fn remote(&self) -> &RemoteClipboard;
 
-    pub async fn shutdown(self) -> Result<()> {
-        self.message.send(ClipboardEvent::Shutdown)?;
-        self.handle.lock().await.take().unwrap().await?;
-        Ok(())
-    }
-
-    pub fn as_stream(&self) -> WatchStream<String> {
-        WatchStream::new(self.current.clone())
-    }
+    fn shutdown(self) -> Result<()>;
 }

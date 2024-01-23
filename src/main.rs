@@ -1,6 +1,9 @@
 use clap::Parser;
 use color_eyre::Result;
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 
+use synclip::clipboard::local_clipboard::LocalClipboard;
 use synclip::clipboard::Clipboard;
 use synclip::{client, server};
 
@@ -28,31 +31,42 @@ pub enum Cli {
 async fn main() -> Result<()> {
     color_eyre::install()?;
     tracing_subscriber::fmt::init();
+    info!("pid: {}", std::process::id());
 
     let cli = Cli::parse();
 
-    let clipboard = Clipboard::new(500).await?;
+    let local_clipboard = LocalClipboard::new()?;
+    let initial = local_clipboard.get().await?;
+    let cancel_token = CancellationToken::new();
 
     match cli {
         Cli::Server { port } => {
-            let server = server::SynclipServer::new(port, clipboard.clone())?;
-            tokio::signal::ctrl_c().await?;
-            let (r1, r2) = tokio::join!(server.shutdown(), clipboard.shutdown());
-            r1?;
-            r2?;
+            let server = server::SynclipServer::new(port, initial, cancel_token.clone()).await?;
+            let mut clipboard = Clipboard::new(local_clipboard, server, 500, cancel_token.clone());
+            let handle = clipboard.start();
+            tokio::select! {
+                _ = cancel_token.cancelled() => {}
+                _ = tokio::signal::ctrl_c() => {
+                    cancel_token.cancel();
+                }
+            }
+            clipboard.shutdown().await?;
+            info!("wait for server shutdown");
+            handle.join().unwrap();
         }
         Cli::Client { address } => {
-            let client = client::SynclipClient::new(address, clipboard.clone()).await?;
-            let mut client_clone = client.clone();
-            let handle1 = tokio::spawn(async move { client_clone.polling_clipboard().await });
-            let mut client_clone = client.clone();
-            let handle2 = tokio::spawn(async move { client_clone.polling_server().await });
-            tokio::signal::ctrl_c().await?;
-            client.shutdown()?;
-            let (r1, r2, r3) = tokio::join!(handle1, handle2, clipboard.shutdown());
-            r1??;
-            r2??;
-            r3?;
+            let client = client::SynclipClient::new(address, initial, cancel_token.clone()).await?;
+            let mut clipboard = Clipboard::new(local_clipboard, client, 500, cancel_token.clone());
+            let handle = clipboard.start();
+            tokio::select! {
+                _ = cancel_token.cancelled() => {}
+                _ = tokio::signal::ctrl_c() => {
+                    cancel_token.cancel();
+                }
+            }
+            clipboard.shutdown().await?;
+            info!("wait for client shutdown");
+            handle.join().unwrap();
         }
     }
 
